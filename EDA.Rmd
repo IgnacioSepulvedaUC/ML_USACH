@@ -1,0 +1,432 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+#### Package
+library(readr)
+library(tidyverse)
+library(gtools)
+library(readxl)
+library(modeldata)
+library(caret)   
+library(rsample) 
+library(ggplot2)
+library(dplyr)
+library(gmodels) 
+library(class) 
+library(C50)
+library(rpart)
+library(rpart.plot)
+library(fastDummies)
+```
+# Parte I
+
+## Datos
+
+```{r}
+## Read
+getwd()
+rm(list=ls())
+df <- read_delim("PARTE 2/bank-additional-full.csv", 
+    delim = ";")
+## Drop pdays
+df <- df %>% select(-pdays)
+```
+```{r}
+## str data
+str(df)
+```
+```{r}
+### NAS
+colSums(is.na(df))
+```
+
+```{r}
+## Factor data.
+factor_cols<- c('job','marital','education',
+              'default','housing','loan',
+              'contact','month','day_of_week',
+              'poutcome','y')
+df[factor_cols] <- lapply(df[factor_cols], factor)
+```
+
+
+## Analisis Exploratorio
+
+### Histogram
+
+```{r}
+## Columnas numéricas
+numeric_cols <- names(df)[!names(df) %in% factor_cols]
+```
+```{r}
+par(mfrow = c(3, 3), xaxs = "i")
+for (i in numeric_cols){
+  boxplot(df[[i]],col='lightblue',main = i,xlab = i)}
+```
+
+```{r}
+par(mfrow = c(3, 3), xaxs = "i")
+for (i in numeric_cols){
+  hist(df[[i]],col='lightblue',main = i,xlab = i)}
+```
+
+ 
+
+### Estadisticas descriptiva
+
+```{r}
+df %>% select(all_of(numeric_cols)) %>% summary()
+```
+
+
+```{r}
+df %>% select(all_of(factor_cols)) %>% summary()
+```
+### Analisis Bivariado
+
+
+```{r}
+for (i in factor_cols) {
+  print(
+    table(
+      df[[paste(i)]],df$y))
+  }
+```
+
+
+```{r}
+par(mfrow = c(3, 3), xaxs = "i")
+for (i in numeric_cols){
+  df[['numeric_y']]=as.numeric(df[['y']])
+  plot(x=df[[i]],
+       y=df$numeric_y,
+       xlab=i,
+       ylab='Si=2 y No=1',
+       main=i,
+       col='blue')
+}
+```
+
+Son muchos gráficos para juntarlos en uno, mejor sacarlo como ventana aparte y revisarlo uno a uno.
+
+```{r}
+categorias <- data.frame(combinations(length(unique(numeric_cols)),2,unique(numeric_cols)))
+    for (i in 1:length(categorias$X1)){
+      x=categorias[i,1]
+      y=categorias[i,2]
+      plot(df[[x]]
+           ,df[[y]]
+           ,col=df[['y']]
+           ,xlab=x
+           ,ylab=y,
+           ,main=paste(c('Scatter ','Si=1 y No=0')))}
+```
+
+
+## KNN
+
+
+### Normalizamos
+
+```{r}
+df_z <- df
+df_z[all_of(numeric_cols)] <- df %>% 
+  select(all_of(numeric_cols)) %>% 
+  lapply(scale) %>% 
+  as.data.frame()
+```
+```{r}
+df$y %>% table/length(df$y)
+```
+
+### Split
+
+```{r}
+#Split
+split <- initial_split(df_z, prop = 0.8, strata = "y")
+df_train <- training(split) 
+df_test <- testing(split) 
+
+#Valida
+round(prop.table(table(df_train$y)),2)
+round(prop.table(table(df_test$y)),2)
+
+#Asigna
+y_train <- df_train$y
+y_test <- df_test$y
+
+# Borra y
+```
+
+
+### Entrenamiento
+
+```{r}
+# Especificar metodo de remuestreo
+cv <- trainControl(method = "cv", number = 10)
+#cv <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
+
+# Especificar parametros
+hyper_grid <- expand.grid(k = seq(1, 60, by = 2))
+
+# Entrenamiento
+knn_fit <- train(y ~ ., data = df_train, method = "knn", 
+                 trControl = cv, tuneGrid = hyper_grid,  metric = "Accuracy")
+
+knn_fit
+ggplot(knn_fit)
+```
+Mejora KNN
+```{r}
+# Especificar metodo de remuestreo
+#cv <- trainControl(method = "cv", number = 10)
+cv <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
+
+# Especificar parametros
+hyper_grid <- expand.grid(k = seq(1, 60, by = 2))
+
+# Entrenamiento
+knn_fit <- train(y ~ ., data = df_train, method = "knn", 
+                 trControl = cv, tuneGrid = hyper_grid,  metric = "Accuracy")
+
+knn_fit
+ggplot(knn_fit)
+```
+
+
+### Prediccion
+```{r}
+knn_model <- knn3(y~.,df_train, k = 30)
+knn_model_result <- predict(knn_model, newdata = df_test, type = 'class')
+```
+
+### Resultados
+
+```{r}
+### O
+CrossTable(x = df_test$y, y = knn_model_result, prop.chisq = FALSE, 
+           prop.c = FALSE, prop.r = FALSE)
+```
+
+```{r}
+conf_matrix <- table(rep('no',length(df_test$y)), df_test$y)
+conf_matrix
+conf_matrix[1,1]/ length(as.numeric(knn_model_result))
+```
+
+
+```{r}
+conf_matrix <- table(knn_model_result, df_test$y)
+conf_matrix
+print(c('Accuracy:',round((conf_matrix[1,1] + conf_matrix[2,2]) / length(as.numeric(knn_model_result)),3)))
+```
+
+## Decision Tree
+
+Ocupamos los mismos datos que para el KNN, y también el CV.
+Cambiamos los hiperparametros
+```{r}
+# Especificar parametros
+hyper_grid_DT <- expand.grid(trials=c(1:50), model="tree", winnow = c(FALSE))
+
+# Entrenamiento
+DT_fit <- train(y ~ ., data = df_train, method = "C5.0", 
+                 trControl = cv, tuneGrid = hyper_grid_DT,  metric = "Accuracy")
+
+DT_fit
+ggplot(DT_fit)
+```
+
+
+```{r}
+DT_model <- C5.0(df_train %>% select(-'y'), df_train$y, trials = 100)
+DT_result <- predict(DT_model, df_test %>%  select(-"y"))
+```
+
+```{r}
+conf_matrix <- table(DT_result, df_test$y)
+conf_matrix
+print(c('Accuracy:',round((conf_matrix[1,1] + conf_matrix[2,2]) / length(as.numeric(DT_result)),3)))
+```
+
+### MEJORA
+
+RANDOM FOREST
+
+```{r}
+library('randomForest')
+set.seed(120)  # Setting seed
+classifier_RF = randomForest(x = df_train %>% select (-c(y)) ,
+                             y = df_train$y,
+                             ntree = 1000)
+```
+```{r}
+# Predicting the Test set results
+y_pred = predict(classifier_RF, newdata = df_test %>% select(-c(y)))
+  
+# Confusion Matrix
+conf_matrix = table(df_test$y, y_pred)
+conf_matrix
+print(c('Accuracy:',round((conf_matrix[1,1] + conf_matrix[2,2]) / length(as.numeric(y_pred)),3)))
+```
+
+
+
+
+# Parte II
+
+
+```{r}
+rm(list=ls())
+df <- read_delim("PARTE 3/Daegu_Real_Estate_data.csv", 
+    delim = ",")
+## Drop pdays
+df_no=df %>% select(c(SalePrice,YearBuilt,YrSold))
+df <- df %>% select(-c(SalePrice,YearBuilt,YrSold))
+```
+```{r}
+colSums(is.na(df))
+```
+
+
+## Analisis Exploratorio
+
+```{r}
+str(df)
+```
+
+```{r}
+### Fix factors
+factor_cols <- c('HallwayType','HeatingType','AptManageType','TimeToBusStop','TimeToSubway','SubwayStation')
+df[factor_cols] <- lapply(df[factor_cols], factor)
+```
+
+```{r}
+## Columnas numéricas
+numeric_cols <- names(df)[!names(df) %in% factor_cols]
+```
+```{r}
+df[all_of(numeric_cols)] %>% summary()
+```
+```{r}
+df[all_of(factor_cols)] %>% summary()
+```
+
+## Plots.
+
+```{r}
+categorias <- data.frame(combinations(length(unique(numeric_cols)),2,unique(numeric_cols)))
+    for (i in 1:length(categorias$X1)){
+      x=categorias[i,1]
+      y=categorias[i,2]
+      plot(df[[x]]
+           ,df[[y]]
+           ,xlab=x
+           ,ylab=y,
+           ,main=paste(c('Scatter ','Si=1 y No=0')))}
+```
+
+
+## K-means clustering
+
+### Normalizamos 
+
+```{r}
+df_z <- df
+df_z[all_of(numeric_cols)] <- df %>% 
+  select(all_of(numeric_cols)) %>% 
+  lapply(scale) %>% 
+  as.data.frame()
+```
+
+### Clustering 
+
+```{r}
+names(df_z)[sapply(df_z, function(x) sum(is.infinite(x)) > 0)]
+names(df_z)[sapply(df_z, function(x) sum(is.nan(x)) > 0)]
+names(df_z)[colSums(is.na(df_z))!=0]
+```
+```{r}
+df_z_d=dummy_cols(df_z, select_columns = factor_cols) %>% select(-all_of(factor_cols))
+```
+
+
+
+### Metodo del codo
+
+```{r}
+#Metodo del codo : Elbow method
+library(factoextra)
+fviz_nbclust(df_z_d, kmeans, k.max=5, method = "wss")
+fviz_nbclust(df_z_d, kmeans, k.max=5, method = "gap_stat")
+fviz_nbclust(df_z_d, kmeans, k.max=5, method = "silhouette")
+```
+
+Dos de los metodos nos sugieren que es 5 el numero correcto. 
+
+### Optimizado
+```{r}
+## Basic K-means, with only numeric columns
+set.seed(2345)
+km = kmeans(df_z_d,3,nstart = 50,iter.max = 15)
+km
+```
+```{r}
+rm(kmm)
+paste('Tamaño')
+km$size
+paste('Proporcion')
+round(prop.table(km$size),3)*100
+```
+```{r}
+aggregate(df_z_d[numeric_cols[1:7]], by=list(cluster=km$cluster), mean)
+aggregate(df_z_d[numeric_cols[8:14]], by=list(cluster=km$cluster), mean)
+aggregate(df_z_d[numeric_cols[15:21]], by=list(cluster=km$cluster), mean)
+```
+
+
+```{r}
+df_z_d[['Cluster']]=factor(km$cluster)
+```
+
+
+Los cluster parecen tener relación con el año en que fue construido
+
+```{r}
+for (i in c('YearBuilt','YrSold')){
+  print(table(df_z_d$Cluster,df_no[[i]]))
+}
+
+```
+
+Igual notamos diferencias en las distribucion de ventas para cu de los boxplot. 
+
+```{r}
+df_z_d[['Venta']]<-df_no$SalePrice
+df_z_d %>% ggplot(aes(x=Cluster,y=Venta)) + geom_boxplot(fill='lightblue')
+```
+
+
+
+Visualizamos los cluster respecto a un analisis bivariado. Floor y Size.
+```{r}
+for (i in numeric_cols){
+      print(df_z_d %>% ggplot(aes(x=Cluster,y=df_z_d[[i]],color=Cluster)) +
+              geom_boxplot()+ylab(i))}
+```
+
+
+Tables
+```{r}
+for (i in factor_cols){
+      print(c('##########',i,'###############'))
+      print(table(df_z[[i]],df_z_d$Cluster))
+      print('#########################')}
+```
+
+
+
+
