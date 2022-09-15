@@ -1,0 +1,589 @@
+---
+output: pdf_document
+---
+
+```{r,warning=FALSE,message=FALSE,echo=FALSE}
+rm(list=ls())
+# Datos
+library(SemiPar)
+library(tidyverse)
+library(caret)
+library(ggpubr)
+data(lidar)
+```
+
+## Respuesta 1
+
+Para la **figura 2.25** vemos que el log ratio se mantiene mas o menos constante, hasta que llega al valor aproximado de 550 donde empieza a decrecer. La dispersión hasta los 600 parece ser aproximadamente constante después de esos valor existe mas amplitud en los valores. Evidentemente un ajuste lineal no parece ser el correcto.
+
+En la **figura 2.26** cuando ajustamos modelos polinomiales vemos que mientras mas grados tenga mas flexibles serán. En general los 3 lo hacen bien y parecido al principio pero al final del rango presentan mayor dificultad para capturar el exceso de dispersión comparado al rango del principio. El libro además menciona los problemas de estabilidad de polinomios de alto grado, lo que eventualmente afectaría el resultado fuera de muestra.
+
+```{r,echo=FALSE,fig.height=3.5}
+gg_inicial=lidar %>% 
+  ggplot(aes(x=range,y=logratio)) +
+  geom_point(color='skyblue')+
+  theme_bw()
+gg_inicial+
+  ggtitle('Figure 2.25',
+                   subtitle='Scatter plot')
+  
+```
+
+```{r,echo=FALSE,fig.height=4,fig.width=8}
+gg_inicial+
+  ## 3 degree
+  stat_smooth(method = "lm", 
+              formula = y ~ poly(x,3),
+              se=FALSE, 
+              size = 1,
+              aes(color='blue')) +
+  ## 4 degree
+  stat_smooth(method = "lm", 
+              formula = y ~ poly(x,4),
+              se=FALSE, 
+              size = 1, 
+              aes(color = "red")) +
+  ## 10 degree
+  stat_smooth(method = "lm", 
+              formula = y ~ poly(x,10),
+              se=FALSE, 
+              size = 1, 
+              aes(color = "green")) +
+  
+  scale_color_identity(name = "Model fit",
+                          breaks = c("blue", "red", "green"),
+                          labels = c("Cubic", "Quartic", "10 Degree"),
+                          guide = "legend") +
+  
+  ggtitle('Figure 2.26',
+          subtitle='Polynomial regression Degree(3,4,10)')
+```
+
+\newpage
+
+## Respuesta 2
+
+Vemos, en **figura 3.6**,que el ajuste con dos knots igual es bueno, presenta mas parsimonia que los modelos polinomiales. Pero igual tiene errores como que al principio tiene un tendencia decreciente cuando los puntos parecen estar mas planos y siguen siendo un problema la volatilidad de rangos altos.
+
+La introducción de dos knots mas,en **figura 3.7**, mejora la calidad del ajuste tanto al inicio como al final. Pero sigue faltando mejoras sobretodo al final.
+
+Para la **figura 3.8** ocurre algo similar a cuando aumentamos el grado del polinomio en cuando a la flexibilidad, mejora el ajuste al principio pero sobre todo al final . Pero es evidente que podríamos tener problemas de sobreajuste.
+
+Finalmente en la **figura 3.9**,vemos que sigue siendo un buen ajuste, pero el sobreajuste en el rango final disminuyo.
+
+```{r,echo=FALSE,fig.height=3.5}
+gg_inicial+
+  geom_smooth(method="lm",
+              formula=  y ~ splines::bs(x, knots = c(575,600), 
+                                        degree = 1),
+              se=FALSE) +
+  ggtitle("Figure 3.6",
+          subtitle="splines knots(600,575)")
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+gg_inicial+
+  geom_smooth(method="lm",
+              formula=  y ~ splines::bs(x, knots = c(500,550,600,650), 
+                                        degree = 1),
+              se=FALSE) +
+  ggtitle("Figure 3.7",
+          subtitle="splines knots(500,550,600,650)")
+```
+
+
+```{r,echo=FALSE,fig.height=3.5}
+secuencia=seq(400,700,12.5)
+gg_inicial+
+  geom_smooth(method="lm",
+              formula=  y ~ splines::bs(x, 
+                                        knots = secuencia, 
+                                        degree = 1),
+              se=FALSE) +
+  ggtitle("Figure 3.8",
+          subtitle="splines knots(400,412.5,...,700)  ")
+
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+secuencia_nueva=secuencia[!(secuencia %in% c(612.5,650,662.5,687.5))]
+gg_inicial+
+  geom_smooth(method="lm",
+              formula=  y ~ splines::bs(x, 
+                                        knots = secuencia_nueva, 
+                                        degree = 1),
+              se=FALSE) +
+  ggtitle("Figure 3.9",
+          subtitle="splines knots(400,412.5,...,700) sin (612.5,650,662.5,687.5) ")
+```
+
+## Respuesta 3
+
+En la **figura 3.10** el ajuste es mejor, logramos suavizar y mejoramos la captura de la tendencia en los datos.
+
+En la **figura 3.11** notamos que ha medida que aumenta el lambda la curva cada vez es menos flexible, lo que podría permitir obtener mejores y mas robustas predicciones fuera de muestra, si logramos optimizar este parámetro lambda.
+
+```{r,echo=FALSE}
+smooth_reg=spm(lidar$logratio~f(lidar$range,knots=secuencia,spar=30))
+lidar[['fitted']]=smooth_reg$fit$fitted
+lidar %>% 
+  ggplot(aes(x=range,y=logratio)) +
+  geom_point(color='skyblue')+
+  theme_bw()+
+  geom_line(aes(x=range,y=fitted),color='blue',size=1) +
+  ggtitle("Figure 3.10",subtitle="splines knots(400,412.5,...,700) con lambda=30")
+```
+
+```{r,echo=FALSE}
+
+
+fitted_0 =spm(lidar$logratio~f(lidar$range,k=24,spar=0.000000001))$fit$fitted
+fitted_10=spm(lidar$logratio~f(lidar$range,k=24,spar=10))$fit$fitted
+fitted_30=spm(lidar$logratio~f(lidar$range,k=24,spar=30))$fit$fitted
+fitted_1000=spm(lidar$logratio~f(lidar$range,k=24,spar=1000))$fit$fitted
+plot_0=gg_inicial + geom_line(aes(x=range,y=fitted_0),color='blue',size=1)+ggtitle("lambda = 0")
+plot_10=gg_inicial + geom_line(aes(x=range,y=fitted_10),color='blue',size=1)+ggtitle("lambda = 10")
+plot_30=gg_inicial + geom_line(aes(x=range,y=fitted_30),color='blue',size=1)+ggtitle("lambda = 30")
+plot_1000=gg_inicial + geom_line(aes(x=range,y=fitted_1000),color='blue',size=1)+ggtitle("lambda = 1000")
+plot=ggarrange(plot_0,plot_10,plot_30,plot_1000)
+annotate_figure(plot, top = text_grob("Figure 3.11", 
+               color = "black", size = 14))
+```
+
+## Respuesta 4
+
+La **figura 3.20** nos muestra que el ajuste es casi idénticos para estos dos lambda. La diferencia en grado de libertad es pequeña y eso se ve refleja en la poca diferencia de los ajustes.
+
+La **figura** **3.21** nos muestra la relación monotonica y decreciente de la lambda--log(lambda)-- vs los grados de libertad, lo que indica que para cada lambda solo existe un correspondiente df.
+
+Finalmente, la **figura 3.22** agrega otra linea a la figura anterior, vemos que la mayor diferencia entre la dos es al centro del gráfico. Dado que los extremos converge hacia una regresión paramétrica.
+
+```{r,echo=FALSE}
+
+fitted_32 =spm(lidar$logratio~f(lidar$range,df=9.86,spar=32))$fit$fitted
+fitted_48=spm(lidar$logratio~f(lidar$range,df=8.34,spar=48))$fit$fitted
+plot_32=gg_inicial + geom_line(aes(x=range,y=fitted_32),color='blue',size=1)+ggtitle("lambda = 32")
+plot_48=gg_inicial + geom_line(aes(x=range,y=fitted_48),color='blue',size=1)+ggtitle("lambda = 48")
+
+plot=ggarrange(plot_32,plot_48)
+annotate_figure(plot, top = text_grob("Figure 3.20", 
+               color = "black", size = 14))
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+edf=function(lambda,knots=24,data=lidar){
+  res=mgcv::gam(logratio ~ s(range,
+                             bs =  "bs",
+                             k = 24), 
+                sp = lambda,
+                data=lidar) %>% 
+    summary()
+  return(res)}
+df_lambda=data.frame()
+row=1
+for (lambda in c(seq(0.5,5,100),seq(5,100000,100))){
+  df_lambda[row,'lambda']=lambda 
+  df_lambda[row,'df']=edf(lambda)$edf
+  df_lambda[row,'resdf']=edf(lambda)$residual.df
+  row=row+1
+  
+}
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+df_lambda %>% 
+  mutate(log_lambda=log(lambda),
+         n_df=length(lidar$range)-resdf) %>% 
+  ggplot(aes(x=log_lambda,y=df)) +
+  geom_line(color='blue',size=1)+
+  ggtitle("Figure 3.21",subtitle= "df(lambda) vs log(lambda)")+
+  xlab("log(lambda)")+
+  theme_bw()
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+df_lambda %>% 
+  mutate(log_lambda=log(lambda),
+         n_df=length(lidar$range)-resdf) %>% 
+  ggplot(aes(x=log_lambda,y=df)) +
+  geom_line(aes(color='blue'),size=1)+
+  geom_line(aes(x=log_lambda,y=n_df,color='red'),size=1)+
+  ggtitle("Figure 3.22",subtitle= "df(lambda) y n-df_res vs log(lambda)")+
+  xlab("log(lambda)")+
+  theme_bw()+
+  scale_color_identity(name = "",
+                          breaks = c("blue", "red"),
+                          labels = c("df", "n-df_res"),
+                          guide = "legend") 
+```
+
+## Respuesta 5
+
+La **figura 5.2** nos muestra que los splines penalizados son extremadamente similares independiente del método de selección escogido, ML o REML.
+
+La **figura 5.3** muestra que CV el lambda minimiza en la parte donde los RSS empieza a converger de manera asintotica mientras CV crece lo que da estabilidad al mínimo.
+
+```{r,echo=FALSE,fig.height=3.5}
+res_REML=mgcv::gam(logratio ~ s(range,
+                             bs = "bs",
+                             k = 24), 
+                method='REML',
+                data=lidar)
+
+res_ML=mgcv::gam(logratio ~ s(range,
+                             bs = "bs",
+                             k = 24), 
+                method='ML',
+                data=lidar)
+
+data.frame(REML=res_REML$fitted.values,
+           ML=res_ML$fitted.values,
+           x=lidar$range,
+           y=lidar$logratio) %>% 
+  ggplot(aes(x=x,y=y)) +
+  geom_point(color='skyblue')+
+  geom_line(aes(x=x,y=ML,color='blue'),size=1)+
+  geom_line(aes(x=x,y=REML,color='red'),size=1)+
+  ggtitle("Figure 5.2",subtitle= "Automatic penalized linear spline")+
+  xlab('range')+
+  ylab('logratio')+
+  theme_bw()+
+  scale_color_identity(name = "Metodo",
+                          breaks = c("blue", "red"),
+                          labels = c("ML", "REML"),
+                          guide = "legend")
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+
+folds=createFolds(lidar$range,k =5)
+LOO_CV=function(lambda,fold,knots=24,m=c(1,1)){
+  row=1
+  df_resultado=data.frame()
+  for (i in folds){
+    df_cv=lidar[-i,] ## Eliminamos 1 muestra
+    res=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = knots,m=m), 
+                  sp=lambda,
+                  data=df_cv)
+    ## Predecimos sobre el excluido
+    prediccion=mgcv::predict.gam(res,data.frame(range=lidar[i,]$range))
+    df_resultado[row,'lambda']=lambda
+    df_resultado[row,'fold']=paste('fold',row)
+    resumen=res %>% summary()
+    
+    df_resultado[row,'df']=resumen$edf
+    df_resultado[row,'RSS']=sum((prediccion-lidar[i,]$logratio)**2)
+    row=row+1}
+  return(df_resultado)
+  
+}
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+## Esta query nos ayuda a Pregunta 5 y 6
+df_lambda=data.frame()
+#df_lambda[["log_lambda"]]=log(df_lambda[["lambda"]])
+row=1
+  for (lambda in c(seq(0.1,100,0.1),seq(100,1000,2),seq(1000,220000,1000)))
+       {
+  resultados0=LOO_CV(lambda=lambda,
+                    folds,
+                    knots=6)
+  resultados1=LOO_CV(lambda=lambda,
+                    folds,
+                    knots=12)
+  resultados2=LOO_CV(lambda=lambda,
+                    folds,
+                    knots=24,m=c(1,1))
+  resultados3=LOO_CV(lambda=lambda,
+                    folds,
+                    knots=48)
+  resultados_RSS=mgcv::gam(logratio ~ s(range,
+                               bs =  "cr",
+                               k = 24), 
+                  sp=lambda,
+                  data=lidar)
+  df_lambda[row,'lambda']=lambda 
+  df_lambda[row,'res_cv_0']=resultados0$RSS %>% sum()
+  df_lambda[row,'edf_0']=resultados0$df %>% mean()
+  df_lambda[row,'res_cv_1']=resultados1$RSS %>% sum()
+  df_lambda[row,'edf_1']=resultados1$df %>% mean()
+  df_lambda[row,'res_cv_2']=resultados2$RSS %>% sum()
+  df_lambda[row,'edf_2']=resultados2$df %>% mean()
+  df_lambda[row,'res_cv_3']=resultados3$RSS %>% sum()
+  df_lambda[row,'edf_3']=resultados3$df %>% mean()
+  df_lambda[row,'res']=sum(resultados_RSS$residuals**2)
+
+  
+  row=row+1
+  
+}
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+min_lambda=df_lambda %>%
+  filter(res_cv_2==min(res_cv_2)) %>%
+  select("lambda")
+df_lambda %>% 
+  mutate(log_lambda=log(lambda)) %>% 
+  ggplot(aes(x=log_lambda,y=res_cv_2)) +
+  geom_line(aes(color='blue'),size=1)+
+  geom_line(aes(x=log_lambda,y=res,color='skyblue'),size=1)+
+  geom_vline(xintercept = log(min_lambda$lambda),color='red',size=1)+
+  ggtitle("Figure 5.3")+
+  xlab("log(lambda)")+
+  ylab("CV(lambda) y RSS(lambda)")+
+  theme_bw()+
+  scale_color_identity(name = "Metodo",
+                          breaks = c("blue", "skyblue"),
+                          labels = c("CV", "RSS"),
+                          guide = "legend") + 
+  annotate("text", 
+           x = 6, 
+           y = 3+0.25, 
+           label = paste("Min CV(lambda) \n log(lambda)=",round(log(min_lambda$lambda),
+                               2)))
+```
+
+## Respuesta 6
+
+La **figura 5.9** nos muestra que una vez escogido el $\lambda$ que penalizara nuestra funciones bases, y que a su vez minimiza el CV, el resultado es parecido independiente de la cantidad de knots que usemos.
+
+Por su parte, la **figura 5.10** nos dice algo similar, pero de igual forma notamos que a medida que crece los knots la regresión se hace mas smooth.
+
+Finalmente, la **figura 5.11** muestra que independiente del orden --el grado al cual se elevara la basis-- de la basis escogida, el $\lambda$ que optimiza es prácticamente el mismo.
+
+```{r,echo=FALSE,fig.height=3.5,warning=FALSE,message=FALSE}
+minimo=df_lambda %>% 
+  filter(res_cv_2==min(res_cv_2))
+minimo2=df_lambda %>% 
+  filter(res_cv_3==min(res_cv_3)) 
+df_lambda %>% filter(lambda >=4) %>% 
+  ggplot(aes(x=edf_2,y=res_cv_2)) +
+  geom_line(aes(color='blue'),size=1) +
+  geom_line(aes(x=edf_3,y=res_cv_3,color='skyblue'),size=1) +
+  geom_vline(xintercept = minimo$edf_2,
+             color="orange",size=1)+
+  geom_vline(xintercept = minimo2$edf_3,color="red",size=1)+
+  ylab("CV(lambda)")+
+  xlab("Df")+
+  scale_color_identity(name = "Knots",
+                          breaks = c("blue", "skyblue"),
+                          labels = c("24", "48"),
+                          guide = "legend")+
+  ggtitle("Figure 5.9",subtitle="CV vs df con diferentes knots, y como funcion de lambda")+
+  annotate('text',
+           x=minimo$lambda[1]+2.5,y=1.46,
+           label=paste(" Minimo 24=",
+                       round(minimo$lambda[1],2),
+                       "\n",
+                       "Minimo 48=",
+                       round(minimo2$lambda[1],2)))+
+  ylim(c(1.42,1.53))+
+  xlim(c(5,16))+
+
+  theme_bw()
+  
+
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+### Los lambdas
+lambda_6=df_lambda %>% 
+  filter(res_cv_0==min(res_cv_0))
+lambda_12=df_lambda %>% 
+  filter(res_cv_1==min(res_cv_1))
+lambda_24=df_lambda %>% 
+  filter(res_cv_2==min(res_cv_2))
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+### Ajustamos 
+res6=mgcv::gam(logratio ~ s(range,
+                               bs =  "bs",
+                               k = 6,
+                            m=c(1,1)), 
+                  sp=lambda_6,
+                  data=lidar)
+res12=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = 12,
+                            m=c(1,1)), 
+                  sp=lambda_12,
+                  data=lidar)
+res24=mgcv::gam(logratio ~ s(range,
+                               bs =  "bs",
+                               k = 24,
+                            m=c(1,1)), 
+                  sp=lambda_24,
+                  data=lidar)
+
+
+gg_inicial +
+  geom_line(aes(x=range,y=res6$fitted.value,color='blue'),size=1) +
+  geom_line(aes(x=range,y=res12$fitted.value,color='red'),size=1) +
+  geom_line(aes(x=range,y=res24$fitted.value,color='green'),size=1)+
+  scale_color_identity(name = "Knots",
+                          breaks = c("blue", "red",'green'),
+                          labels = c("6","12","24"),
+                          guide = "legend")+
+  ggtitle("Figure 5.10",subtitle="Minimo CV lineal con 6,12 y 24 knots.")
+```
+
+```{r,echo=FALSE,fig.height=3.5}
+df_degree=data.frame()
+row=1
+  for (lambda in c(seq(3,300,1))){
+  resultados_linear=LOO_CV(lambda=lambda,
+                    folds,
+                    knots=24,
+                    m=c(1,1))
+  resultados_qua=LOO_CV(lambda=lambda,
+                    folds,
+                    knots=24,
+                    m=c(2,1))
+  df_degree[row,'lambda']=lambda
+  df_degree[row,'res_cv_0']=resultados_linear$RSS %>% sum()
+  df_degree[row,'res_df_0']=resultados_linear$df %>% mean()
+  df_degree[row,'res_cv_1']=resultados_qua$RSS %>% sum()
+  df_degree[row,'res_df_1']=resultados_qua$df %>% mean()
+  row=row+1}
+```
+
+```{r,echo=FALSE,fig.height=3.5,warning=FALSE,message=FALSE}
+minimo0=df_degree %>% filter(res_cv_0==min(res_cv_0))
+minimo1=df_degree %>% filter(res_cv_1==min(res_cv_1))
+df_degree %>%
+  ggplot()+
+  geom_line(aes(x=res_df_1,y=res_cv_1,color='skyblue'),size=1)+
+  geom_line(aes(x=res_df_0,y=res_cv_0,color='blue'),size=1)+
+  geom_vline(xintercept = minimo0$res_df_0,color='red')+
+  geom_vline(xintercept = minimo1$res_df_1,color='orange')+
+  ggtitle('Figure 5.11',subtitle='Linear vs Quadratic spline')+
+  xlab('Df')+
+  ylab("CV(lambda)")+
+  scale_color_identity(name = "spline",
+                          labels = c("Quadratic", "Linear"),
+                          breaks = c("skyblue","blue"),
+                          guide = "legend")+
+  ylim(c(1.45,1.7))+
+  xlim(c(4.5,14))+
+  theme_bw()
+```
+
+## Pregunta 7
+
+La **figura 5.13** hace el énfasis en que a mayor grado de la basis mas smooth sera el ajuste. Por lo tanto, una lineal se ve que tiene un ajuste peor que una cuadrática.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE,fig.height=3.5}
+lambda_linear=minimo0$lambda
+lambda_quadratic=minimo1$lambda
+### Modelamos
+res_linear=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = 6,
+                               m=c(1,1)), 
+                  sp=lambda_linear,
+                  data=lidar)
+res_quadratic=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = 6,
+                               m=c(2,1)), 
+                  sp=lambda_quadratic,
+                  data=lidar)
+gg_inicial +
+  geom_line(aes(x=range,y=res_linear$fitted.value,color='blue'),size=1)+
+  geom_line(aes(x=range,y=res_quadratic$fitted.value,color='green'),size=1)+
+  ggtitle("Figure 5.13",subtitle="Min CV 6 knot, linear and quadratic splines")+
+  scale_color_identity(name = "spline",
+                          labels = c("Quadratic", "Linear"),
+                          breaks = c("green","blue"),
+                          guide = "legend")
+  
+```
+
+## Pregunta 8
+
+Ocuparemos un splines lineal con 6 knots como ejemplo. La **figura 6.1** nos muestra el intervalo de confianza para un subconjunto del total de rangos muestreados, entre el 450 al 500. Se les gráfico su intervalo de confianza con un 95% de confianza.
+
+La **Figura 6.2** muestra el intervalo de confianza para toda la serie, tiene una cobertura relativamente baja. 
+
+Por su parte, la **Figura 6.3** incluye los intervalos predictivos los cuales son mas amplios, y por tanto tiene una mejor cobertura. Dado que ahora es la desviación del ajuste mas el del residuo.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE,fig.height=3.5}
+### Modelamos
+res_final=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = 6,
+                               m=c(1,1)),data=lidar)
+
+prediccion <- predict(res_final,newdata = data.frame(range = lidar$range), se.fit = TRUE)
+lidar %>% 
+  mutate(banda_inf=res_final$fitted.value-1.96*prediccion$se.fit,
+         banda_Sup=res_final$fitted.value+1.96*prediccion$se.fit,
+         inf_420=ifelse(range %in% c(450:500),banda_inf,0),
+         sup_420=ifelse(range %in% c(450:500),banda_Sup,0))%>%
+  ggplot(aes(x=range,y=logratio)) +
+  geom_point(aes(color='skyblue'))+
+  theme_bw() +
+  geom_line(aes(x=range,y=res_final$fitted.value,color='blue'),size=1)+
+  ggtitle("Figure 6.1",subtitle="6 knot linear spline, con IC(95%) entre 450-500")+
+  scale_color_identity(name = "spline",
+                          labels = c("Linear"),
+                          breaks = c("blue"),
+                          guide = "legend")+
+  geom_ribbon(aes(ymin = inf_420, ymax = sup_420), alpha = 0.6)
+```
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE,fig.height=3.5}
+### Modelamos
+res_final=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = 6,
+                               m=c(1,1)),data=lidar)
+
+prediccion <- predict(res_final,newdata = data.frame(range = lidar$range), se.fit = TRUE)
+lidar %>% 
+  mutate(banda_inf=res_final$fitted.value-1.96*prediccion$se.fit,
+         banda_Sup=res_final$fitted.value+1.96*prediccion$se.fit)%>%
+  ggplot(aes(x=range,y=logratio)) +
+  geom_point(aes(color='skyblue'))+
+  theme_bw() +
+  geom_line(aes(x=range,y=res_final$fitted.value,color='blue'),size=1)+
+  ggtitle("Figure 6.2",subtitle="6 knot linear spline, con IC(95%)")+
+  scale_color_identity(name = "spline",
+                          labels = c("Linear"),
+                          breaks = c("blue"),
+                          guide = "legend")+
+  geom_ribbon(aes(ymin = banda_inf, ymax = banda_Sup), alpha = 0.6)
+```
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE,fig.height=3.5}
+### Modelamos
+res_final=mgcv::gam(logratio ~ s(range,
+                               bs = "bs",
+                               k = 6,
+                               m=c(1,1)),data=lidar)
+
+prediccion <- predict(res_final,newdata = data.frame(range = lidar$range), se.fit = TRUE)
+var_e=sd(prediccion$fit-lidar$logratio)**2
+var_fx=prediccion$se.fit**2
+lidar %>% 
+  mutate(banda_pi_inf=res_final$fitted.value-1.96*sqrt(var_fx+var_e),
+         banda_pi_Sup=res_final$fitted.value+1.96*sqrt(var_fx+var_e),
+         banda_ci_inf=res_final$fitted.value-1.96*sqrt(var_fx),
+         banda_ci_Sup=res_final$fitted.value+1.96*sqrt(var_fx)) %>%
+  ggplot(aes(x=range,y=logratio)) +
+  geom_point(aes(color='skyblue'))+
+  theme_bw() +
+  geom_line(aes(x=range,y=res_final$fitted.value,color='blue'),size=1)+
+  ggtitle("Figure 6.3",subtitle="6 knot linear spline, con IC(95%) gris oscuro y PI(95%) gris claro")+
+  scale_color_identity(name = "spline",
+                          labels = c("Linear"),
+                          breaks = c("blue"),
+                          guide = "legend")+
+  geom_ribbon(aes(ymin = banda_pi_inf, ymax = banda_pi_Sup), alpha = 0.6)+
+  geom_ribbon(aes(ymin = banda_ci_inf, ymax = banda_ci_Sup), alpha = 0.3)
+```
